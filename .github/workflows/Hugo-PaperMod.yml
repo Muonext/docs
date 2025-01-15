@@ -55,12 +55,6 @@ jobs:
             local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
             local category=$(dirname "$file" | sed 's|^./||')
             
-            # 如果 front matter 已存在则跳过
-            if sed -n '1,/^---$/p' "$file" | grep -q "^---$"; then
-              cp "$file" "content/$category/$title.md"
-              return
-            fi
-            
             # 生成新的 front matter
             {
               echo "---"
