@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'  # UTC 每天2点
   workflow_dispatch:
 
 permissions:
@@ -22,15 +22,15 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
+    
     steps:
-      # 1. 检出仓库代码
+      # 1. 检出代码
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
 
-      # 2. 安装 Hugo
+      # 2. 设置 Hugo
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
         with:
@@ -41,111 +41,60 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # 4. 准备 content（复制附件 & 处理 Markdown）
-      - name: Prepare content
+      # 4. 下载 PaperMod 主题 & 处理文档
+      - name: Download PaperMod theme
         run: |
-          # 下载 PaperMod 主题
           mkdir -p themes
           git clone https://github.com/adityatelange/hugo-PaperMod.git themes/PaperMod
-
-          # 创建 content 目录
-          mkdir -p content
-
-          # 函数：判断是否需要跳过某个文件/目录
-          should_skip() {
-            local p="$1"
-
-            # 跳过 .git / .github / workflow / themes 等文件夹，防止把主题也复制进 content
-            if [[ "$p" == ./.git* || "$p" == ./.github* || "$p" == ./themes* ]]; then
-              return 0  # 0 表示 true -> 跳过
-            fi
-
-            # 比如跳过顶层 README.md
-            if [[ "$p" == ./README.md ]]; then
-              return 0
-            fi
-
-            return 1  # 1 表示 false -> 不跳过
-          }
-
-          # 函数：自动生成或保留 Front Matter
+          
+          # 这里的重点：把所有 .md 文件都写为 type = "post"
           generate_front_matter() {
-            local src_md="$1"
-            local rel_path="${src_md#./}"    # 去掉 ./ 前缀
-            local title=$(basename "$rel_path" .md | basename -s .MD | basename -s .Md)  # 去掉多种后缀可能
+            local file="$1"
+            local title=$(basename "$file" .md)
             local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            local category=$(dirname "$file" | sed 's|^./||')
 
-            # 目录名作为分类(可按需修改)
-            local cat="$(dirname "$rel_path")"
-            if [ "$cat" == "." ]; then
-              cat="root"  # 如果是在根目录，就给个 "root" 分类
-            else
-              # 只取第一级，假如你有多级目录
-              cat="$(echo "$cat" | cut -d/ -f1)"
+            # 如果已有 front matter，就直接复制
+            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
+              cp "$file" "content/$category/$title.md"
+              return
             fi
 
-            local dest_md="content/$rel_path"
-            mkdir -p "$(dirname "$dest_md")"
-
-            # Debug 输出
-            echo " - Generating front matter for: $src_md"
-            echo "   => title=$title; category=$cat; dest=$dest_md"
-
-            if grep -q "^---" "$src_md"; then
-              cp "$src_md" "$dest_md"
-            else
-              {
-                echo "---"
-                echo "title: \"$title\""
-                echo "date: $date"
-                echo "categories: [\"$cat\"]"
-                echo "type: \"post\""
-                echo "---"
-                cat "$src_md"
-              } > "$dest_md"
-            fi
+            # 若没有 front matter，自动生成
+            {
+              echo "---"
+              echo "title: \"$title\""
+              echo "date: $date"
+              # 想按目录来区分分类，可保留这一行
+              echo "categories: [\"$category\"]"
+              # ★★ 修复点：统一指定所有文章的 type = "post" ★★
+              echo "type: \"post\""
+              echo "---"
+              cat "$file"
+            } > "content/$category/$title.md"
           }
 
-          echo "=== Copying non-MD files (attachments) ==="
-          # 先复制非 .md (或 .MD) 文件
-          while IFS= read -r -d '' file; do
-            echo "[Non-MD found] $file"
-            if should_skip "$file"; then
-              echo " -> Skipped $file"
-              continue
-            fi
-            dest="content/${file#./}"
-            mkdir -p "$(dirname "$dest")"
-            cp "$file" "$dest"
-            echo " -> Copied to $dest"
-          done < <(find . -type f ! $ -iname "*.md" $ -print0)
+          # 遍历所有 md 文件（排除 README.md）
+          find . -type f -name "*.md" ! -name "README.md" | while read file; do
+            dir=$(dirname "$file" | sed 's|^./||')
+            mkdir -p "content/$dir"
+            generate_front_matter "$file"
+          done
 
-          echo "=== Processing MD files ==="
-          # 再处理 MD (大小写不敏感)
-          while IFS= read -r -d '' mdfile; do
-            echo "[MD found] $mdfile"
-            if should_skip "$mdfile"; then
-              echo " -> Skipped $mdfile"
-              continue
-            fi
-            generate_front_matter "$mdfile"
-          done < <(find . -type f -iname "*.md" -print0)
-
-          echo "=== Finished copying content ==="
-          echo "Final content tree:"
-          ls -R content || true
-
-      # 5. 写入 Hugo 配置
+      # 5. 创建并写入 Hugo 配置
       - name: Configure Hugo
         run: |
           cat > config.toml << EOL
-          baseURL = "https://2024365.xyz"
+          baseURL = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           languageCode = "zh-cn"
           title = "${{ github.repository_owner }}'s Space"
           theme = "PaperMod"
 
           [params]
+            # 指定 mainSections 只有一个: "post"
+            # 因为我们在上面把所有文件都设为 type = "post"
             mainSections = ["post"]
+
             defaultTheme = "auto"
             ShowReadingTime = true
             ShowShareButtons = false
@@ -165,6 +114,7 @@ jobs:
           [outputs]
             home = ["HTML", "RSS", "JSON"]
 
+          # 想自定义分类和标签名称，可在这里改
           [taxonomies]
             category = "categories"
             tag = "tags"
@@ -178,7 +128,10 @@ jobs:
             ]
           EOL
 
+          # 至少留个 content 目录
           mkdir -p content
+
+          # 搜索页面
           cat > content/search.md << EOL
           ---
           title: "Search"
@@ -188,6 +141,7 @@ jobs:
           ---
           EOL
 
+          # 归档页面
           cat > content/archives.md << EOL
           ---
           title: "Archives"
