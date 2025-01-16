@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 时间 2 点
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 permissions:
@@ -48,54 +48,52 @@ jobs:
           mkdir -p themes
           git clone https://github.com/adityatelange/hugo-PaperMod.git themes/PaperMod
 
-          # 创建 content 目录，Hugo 默认从 content/ 读取内容
+          # 创建 content 目录
           mkdir -p content
 
-          # 判断是否跳过某些文件/目录的函数
+          # 函数：判断是否需要跳过某个文件/目录
           should_skip() {
             local p="$1"
 
-            # 跳过 .git / .github / 顶层 README.md / 以及 workflow 配置文件本身
-            if [[ "$p" == ./.git* || "$p" == ./.github* ]]; then
-              return 0  # 0 表示 true，这里选择跳过
+            # 跳过 .git / .github / workflow / themes 等文件夹，防止把主题也复制进 content
+            if [[ "$p" == ./.git* || "$p" == ./.github* || "$p" == ./themes* ]]; then
+              return 0  # 0 表示 true -> 跳过
             fi
-            # 如果你有更多需要跳过的文件或目录，可在此添加规则
 
-            # 跳过顶层 README.md（可按需调整）
+            # 如果有更多需要跳过的文件或目录，可在这里添加规则
+            # 比如跳过顶层 README.md:
             if [[ "$p" == ./README.md ]]; then
               return 0
             fi
 
-            return 1  # 1 表示 false，不跳过
+            return 1  # 1 表示 false -> 不跳过
           }
 
-          # 自动生成或保留 Front Matter
+          # 函数：自动生成或保留 Front Matter
           generate_front_matter() {
             local src_md="$1"
-
-            # 以去掉开头的 "./" 作为相对路径（比如 docs/xx.md）
-            local rel_path="${src_md#./}"
-
+            local rel_path="${src_md#./}"    # 去掉 ./ 前缀
             local title=$(basename "$rel_path" .md)
             local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-            # 取该 md 文件的上一级目录名作为分类（可随需求改进）
+            # 目录名作为分类(可按需修改)
             local category="$(dirname "$rel_path" | cut -d/ -f1)"
 
-            # 目标路径：content/ + 相对路径
             local dest_md="content/$rel_path"
             mkdir -p "$(dirname "$dest_md")"
 
-            # 如果已有 front matter，则原样复制
             if grep -q "^---" "$src_md"; then
               cp "$src_md" "$dest_md"
             else
-              # 否则自动生成 front matter
               {
                 echo "---"
                 echo "title: \"$title\""
                 echo "date: $date"
+              echo "categories: [\"$category\"]"
+              echo "categories: [\"$category\"]"
+              # ★★ 修复点：统一指定所有文章的 type = "post" ★★
                 echo "categories: [\"$category\"]"
+              # ★★ 修复点：统一指定所有文章的 type = "post" ★★
                 echo "type: \"post\""
                 echo "---"
                 cat "$src_md"
@@ -103,19 +101,18 @@ jobs:
             fi
           }
 
-          # 遍历整个仓库，把文件复制到 content/ 下保持路径结构
-          # 先处理非 Markdown 文件（附件、图片等）
+          # 先复制非 md 文件
           while IFS= read -r -d '' file; do
             if should_skip "$file"; then
               continue
             fi
-            # 若是非 .md 文件，直接复制（保持路径结构）
-            dest="content/${file#./}"
+            # 将非 .md 文件复制到 content 下保留路径结构
+            local dest="content/${file#./}"
             mkdir -p "$(dirname "$dest")"
             cp "$file" "$dest"
           done < <(find . -type f ! -name "*.md" -print0)
 
-          # 再处理 .md 文件
+          # 再处理 md 文件
           while IFS= read -r -d '' mdfile; do
             if should_skip "$mdfile"; then
               continue
@@ -123,7 +120,7 @@ jobs:
             generate_front_matter "$mdfile"
           done < <(find . -type f -name "*.md" -print0)
 
-      # 5. 写入 Hugo 配置（config.toml）
+      # 5. 写入 Hugo 配置
       - name: Configure Hugo
         run: |
           cat > config.toml << EOL
@@ -133,7 +130,7 @@ jobs:
           theme = "PaperMod"
 
           [params]
-            # 所有文章都被设置为 type="post"，因此 mainSections = ["post"]
+            # 所有文章都设置为 type="post"
             mainSections = ["post"]
 
             defaultTheme = "auto"
@@ -168,7 +165,7 @@ jobs:
             ]
           EOL
 
-          # 额外创建搜索页面 & 归档页面
+          # 创建搜索页 & 归档页
           mkdir -p content
           cat > content/search.md << EOL
           ---
