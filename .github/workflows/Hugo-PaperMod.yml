@@ -60,8 +60,7 @@ jobs:
               return 0  # 0 表示 true -> 跳过
             fi
 
-            # 如果有更多需要跳过的文件或目录，可在这里添加规则
-            # 比如跳过顶层 README.md:
+            # 比如跳过顶层 README.md
             if [[ "$p" == ./README.md ]]; then
               return 0
             fi
@@ -73,25 +72,33 @@ jobs:
           generate_front_matter() {
             local src_md="$1"
             local rel_path="${src_md#./}"    # 去掉 ./ 前缀
-            local title=$(basename "$rel_path" .md)
+            local title=$(basename "$rel_path" .md | basename -s .MD | basename -s .Md)  # 去掉多种后缀可能
             local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
             # 目录名作为分类(可按需修改)
-            local category="$(dirname "$rel_path" | cut -d/ -f1)"
+            local cat="$(dirname "$rel_path")"
+            if [ "$cat" == "." ]; then
+              cat="root"  # 如果是在根目录，就给个 "root" 分类
+            else
+              # 只取第一级，假如你有多级目录
+              cat="$(echo "$cat" | cut -d/ -f1)"
+            fi
 
             local dest_md="content/$rel_path"
             mkdir -p "$(dirname "$dest_md")"
 
+            # Debug 输出
+            echo " - Generating front matter for: $src_md"
+            echo "   => title=$title; category=$cat; dest=$dest_md"
+
             if grep -q "^---" "$src_md"; then
-              # 如果已有 front matter，则直接复制
               cp "$src_md" "$dest_md"
             else
-              # 若没有 front matter，自动插入
               {
                 echo "---"
                 echo "title: \"$title\""
                 echo "date: $date"
-                echo "categories: [\"$category\"]"
+                echo "categories: [\"$cat\"]"
                 echo "type: \"post\""
                 echo "---"
                 cat "$src_md"
@@ -99,38 +106,46 @@ jobs:
             fi
           }
 
-          # 先复制非 .md 文件
+          echo "=== Copying non-MD files (attachments) ==="
+          # 先复制非 .md (或 .MD) 文件
           while IFS= read -r -d '' file; do
+            echo "[Non-MD found] $file"
             if should_skip "$file"; then
+              echo " -> Skipped $file"
               continue
             fi
-            # 用普通变量（非 local）来存放目标路径
             dest="content/${file#./}"
             mkdir -p "$(dirname "$dest")"
             cp "$file" "$dest"
-          done < <(find . -type f ! -name "*.md" -print0)
+            echo " -> Copied to $dest"
+          done < <(find . -type f ! $ -iname "*.md" $ -print0)
 
-          # 再处理 .md 文件
+          echo "=== Processing MD files ==="
+          # 再处理 MD (大小写不敏感)
           while IFS= read -r -d '' mdfile; do
+            echo "[MD found] $mdfile"
             if should_skip "$mdfile"; then
+              echo " -> Skipped $mdfile"
               continue
             fi
             generate_front_matter "$mdfile"
-          done < <(find . -type f -name "*.md" -print0)
+          done < <(find . -type f -iname "*.md" -print0)
+
+          echo "=== Finished copying content ==="
+          echo "Final content tree:"
+          ls -R content || true
 
       # 5. 写入 Hugo 配置
       - name: Configure Hugo
         run: |
           cat > config.toml << EOL
-          baseURL = "https://2024365.xyz"
+          baseURL = "2024365.xyz"
           languageCode = "zh-cn"
           title = "${{ github.repository_owner }}'s Space"
           theme = "PaperMod"
 
           [params]
-            # 所有文章都设置为 type="post"
             mainSections = ["post"]
-
             defaultTheme = "auto"
             ShowReadingTime = true
             ShowShareButtons = false
@@ -163,7 +178,6 @@ jobs:
             ]
           EOL
 
-          # 创建搜索页 & 归档页
           mkdir -p content
           cat > content/search.md << EOL
           ---
