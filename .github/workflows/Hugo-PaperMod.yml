@@ -176,7 +176,6 @@ jobs:
           layout: "search"
           summary: "search"
           placeholder: "搜索文章..."
-          type: "post"
           ---
           EOL
 
@@ -186,7 +185,6 @@ jobs:
           layout: "archives"
           url: "/archives/"
           summary: "archives"
-          type: "post"
           ---
           EOL
 
