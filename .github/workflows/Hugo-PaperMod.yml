@@ -139,7 +139,7 @@ jobs:
       - name: Configure Hugo
         run: |
           cat > config.toml << EOL
-          baseURL = "2024365.xyz"
+          baseURL = "https://2024365.xyz"
           languageCode = "zh-cn"
           title = "${{ github.repository_owner }}'s Space"
           theme = "PaperMod"
