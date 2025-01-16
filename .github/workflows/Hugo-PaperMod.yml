@@ -22,7 +22,7 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    
+
     steps:
       # 1. 检出仓库代码
       - name: Checkout
@@ -83,17 +83,15 @@ jobs:
             mkdir -p "$(dirname "$dest_md")"
 
             if grep -q "^---" "$src_md"; then
+              # 如果已有 front matter，则直接复制
               cp "$src_md" "$dest_md"
             else
+              # 若没有 front matter，自动插入
               {
                 echo "---"
                 echo "title: \"$title\""
                 echo "date: $date"
-              echo "categories: [\"$category\"]"
-              echo "categories: [\"$category\"]"
-              # ★★ 修复点：统一指定所有文章的 type = "post" ★★
                 echo "categories: [\"$category\"]"
-              # ★★ 修复点：统一指定所有文章的 type = "post" ★★
                 echo "type: \"post\""
                 echo "---"
                 cat "$src_md"
@@ -101,18 +99,18 @@ jobs:
             fi
           }
 
-          # 先复制非 md 文件
+          # 先复制非 .md 文件
           while IFS= read -r -d '' file; do
             if should_skip "$file"; then
               continue
             fi
-            # 将非 .md 文件复制到 content 下保留路径结构
-            local dest="content/${file#./}"
+            # 用普通变量（非 local）来存放目标路径
+            dest="content/${file#./}"
             mkdir -p "$(dirname "$dest")"
             cp "$file" "$dest"
           done < <(find . -type f ! -name "*.md" -print0)
 
-          # 再处理 md 文件
+          # 再处理 .md 文件
           while IFS= read -r -d '' mdfile; do
             if should_skip "$mdfile"; then
               continue
