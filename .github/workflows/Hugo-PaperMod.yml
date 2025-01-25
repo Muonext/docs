@@ -1,170 +1,181 @@
 name: Deploy Hugo site to Pages
 
-# 触发条件配置
 on:
   push:
-    branches: [ main ]      # 主分支推送时触发
+    branches: [ main ]
   schedule:
-    - cron: '0 2 * * *'     # 每日UTC时间2点自动构建（用于定期更新内容）
-  workflow_dispatch:        # 允许手动触发工作流
+    - cron: '0 2 * * *'  # UTC 每天2点
+  workflow_dispatch:
 
-# 权限配置（遵循最小权限原则）
 permissions:
-  contents: read           # 读取仓库内容
-  pages: write             # 写入GitHub Pages
-  id-token: write          # 用于OIDC令牌认证
+  contents: read
+  pages: write
+  id-token: write
 
-# 并发控制（防止重复部署冲突）
 concurrency:
-  group: "pages"           # 同一分组共享并发控制
-  cancel-in-progress: false # 不取消进行中的部署
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build-deploy:
-    runs-on: ubuntu-latest  # 使用最新Ubuntu运行器
-    
-    # 环境配置（连接GitHub Pages环境）
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }} # 部署后的URL
-    
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
-      CUSTOM_DOMAIN: ${{ github.event.repository.pages.cname }} # 自定义域名变量
+      CUSTOM_DOMAIN: ${{ github.event.repository.pages.cname }}
     
     steps:
-      # ---------------------------
-      # 步骤1：代码检出（关键基础步骤）
-      # ---------------------------
+      # 1. 检出代码（建议 fetch-depth 设置为 0，拉取所有提交历史，确保能拿到文件创建时间）
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'  # 递归检出子模块（适用于主题依赖）
-          fetch-depth: 0          # 获取完整Git历史（用于提取文件时间信息）
+          submodules: 'recursive'
+          fetch-depth: 0
 
-      # ---------------------------
-      # 步骤2：Hugo环境配置
-      # ---------------------------
+      # 2. 设置 Hugo
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
         with:
-          hugo-version: 'latest'  # 自动获取最新稳定版
-          extended: true          # 启用扩展版（支持Sass/SCSS）
+          hugo-version: 'latest'
+          extended: true
 
-      # ---------------------------
-      # 步骤3：GitHub Pages配置
-      # ---------------------------
+      # 3. 配置 GitHub Pages
       - name: Setup Pages
-        uses: actions/configure-pages@v4  # 官方配置Actions
+        uses: actions/configure-pages@v4
 
-      # ---------------------------
-      # 步骤4：主题安装与内容预处理（核心逻辑）
-      # ---------------------------
+      # 4. 下载 PaperMod 主题 & 处理文档
+      #
+      #   此步骤中：
+      #   - 我们先下载主题 PaperMod 到 themes/PaperMod。
+      #   - 对仓库内所有 .md 文件（排除 README.md）进行处理：
+      #       1. 获取该文件在 Git 历史中的首次提交时间作为 `date`。
+      #       2. 获取该文件最新一次提交的提交时间作为 `lastmod`。
+      #       3. 如果原文件已有 Front Matter，则只更新/覆盖其中的 date、lastmod、type 字段；
+      #          保留其他字段不变。
+      #       4. 如果原文件没有 Front Matter，则自动生成带上述字段的新 Front Matter。
+      #       5. 将处理结果写到 `content/<子目录>/<文件名>.md` 中。
+      #
       - name: Download PaperMod theme
         run: |
-          # 安装PaperMod主题
           mkdir -p themes
           git clone https://github.com/adityatelange/hugo-PaperMod.git themes/PaperMod
-
-          # Front Matter处理函数
-          process_front_matter() {
+          
+          # 函数：为每个 Markdown 文件写入或更新 Front Matter
+          generate_front_matter() {
             local file="$1"
-            local title=$(basename "$file" .md)
-            local category=$(dirname "$file" | sed 's|^./||') # 保留目录结构作为分类
+            local title
+            local category
+            local creationDate
+            local lastModDate
 
-            # 提取Git时间信息（ISO8601格式）
-            created_date=$(git log --diff-filter=A --follow --format=%aI -- "$file" | tail -1) # 首次提交时间
-            lastmod_date=$(git log -1 --format=%aI -- "$file") # 最后修改时间
+            title=$(basename "$file" .md)
+            # 根据文件所在的相对路径来做分类（可根据需要自行调整）
+            category=$(dirname "$file" | sed 's|^./||')
 
-            # 空值处理（防止无历史记录时出错）
-            [ -z "$created_date" ] && created_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            [ -z "$lastmod_date" ] && lastmod_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            # 获取文件创建日期 (首次提交时间)
+            creationDate=$(git log --diff-filter=A --format=%aI -1 "$file" 2>/dev/null || true)
+            # 若获取不到，则给个默认值（比如当前时间）
+            if [ -z "$creationDate" ]; then
+              creationDate=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            fi
 
-            # Front Matter处理逻辑
-            if sed -n '1{/^---$/p};q' "$file" | grep -q "^---$"; then
-              # 存在Front Matter的情况
-              temp_file=$(mktemp)
-              cp "$file" "$temp_file"
+            # 获取文件最后一次提交的提交时间
+            lastModDate=$(git log -1 --format=%cI "$file" 2>/dev/null || true)
+            # 同样，如果没有拿到，就给个默认值
+            if [ -z "$lastModDate" ]; then
+              lastModDate=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            fi
 
-              # 移除旧日期字段（避免冲突）
-              sed -i '/^date:/d; /^lastmod:/d' "$temp_file"
+            # 读取原文件的 front matter（若有）
+            # 将其存入变量 front_matter_block
+            front_matter_block=$(sed -n '/^---$/,/^---$/p' "$file")
 
-              # 插入新日期到Front Matter首部
-              sed -i "1,/^---$/ {
-                /^---$/i\
-          date: $created_date\\
-          lastmod: $lastmod_date
-              }" "$temp_file"
+            # 输出到的目标位置
+            outdir="content/$category"
+            outfile="$outdir/$title.md"
 
-              # 保留原始目录结构
-              mkdir -p "content/$category"
-              mv "$temp_file" "content/$category/$title.md"
+            mkdir -p "$outdir"
+
+            if [ -n "$front_matter_block" ]; then
+              # 如果源文件已有 front matter，则仅更新其中的 date / lastmod / type
+              # 1. 移除头尾的 "---"
+              trimmed=$(echo "$front_matter_block" | sed '1d;$d')
+
+              # 2. 移除已有的 date、lastmod、type 字段（若存在）
+              trimmed=$(echo "$trimmed" | sed -E '/^(date|lastmod|type):/d')
+
+              # 3. 重新写入新的 date / lastmod / type
+              new_front_matter="---\n${trimmed}\ndate: $creationDate\nlastmod: $lastModDate\ntype: \"post\"\n---"
+
+              # 4. 获取 front matter 后面的正文
+              #    由于我们用 sed -n '/^---$/,/^---$/p' 已经截取了 front matter，
+              #    所以正文就是去掉那部分后剩余的内容
+              #    （注：如果源文件 front matter 在开头，下面命令可正常截取）
+              body=$(sed '1,/^---$/d' "$file" | sed '/^---$/,$d')
+
+              # 写到目标位置
+              {
+                echo "$new_front_matter"
+                echo "$body"
+              } > "$outfile"
+
             else
-              # 无Front Matter的情况
+              # 若没有 front matter，则自动生成
               {
                 echo "---"
-                echo "title: \"$title\""           # 自动生成标题
-                echo "date: $created_date"         # 基于Git的创建时间
-                echo "lastmod: $lastmod_date"      # 基于Git的修改时间
-                echo "categories: [\"$category\"]" # 目录结构作为分类
-                echo "type: \"post\""              # 统一内容类型
+                echo "title: \"$title\""
+                echo "date: $creationDate"
+                echo "lastmod: $lastModDate"
+                echo "categories: [\"$category\"]"
+                echo "type: \"post\""
                 echo "---"
-                cat "$file"                        # 保留原始内容
-              } > "content/$category/$title.md"
+                cat "$file"
+              } > "$outfile"
             fi
           }
 
-          # 批量处理Markdown文件
+          # 遍历所有 md 文件（排除 README.md），逐一处理
           find . -type f -name "*.md" ! -name "README.md" | while read file; do
-            dir=$(dirname "$file" | sed 's|^./||') # 规范化目录路径
-            mkdir -p "content/$dir"                # 重建目录结构
-            process_front_matter "$file"           # 执行处理函数
+            generate_front_matter "$file"
           done
 
-      # ---------------------------
-      # 步骤5：自定义域名处理
-      # ---------------------------
+      # 5. 获取自定义域名
       - name: Retrieve custom domain
         id: fetch-domain
         run: |
-          # 通过GitHub API获取Pages配置
           customDomain=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/pages \
-            | jq -r '.cname // ""')  # 使用jq解析JSON响应
-
-          # 环境变量传递
+          https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/pages \
+          | jq -r '.cname // ""')
           echo "CUSTOM_DOMAIN=$customDomain" >> $GITHUB_ENV
 
-      # ---------------------------
-      # 步骤6：动态生成Hugo配置
-      # ---------------------------
+      # 6. 创建并写入 Hugo 配置
       - name: Configure Hugo
         run: |
-          # 域名逻辑处理
           if [ -n "$CUSTOM_DOMAIN" ]; then
-            domain="$CUSTOM_DOMAIN"       # 使用自定义域名
+            domain="$CUSTOM_DOMAIN"
           else
-            # 默认GitHub Pages路径
             owner="${GITHUB_REPOSITORY_OWNER}"
             repo="$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)"
-            domain="$owner.github.io/$repo" 
+            domain="$owner.github.io/$repo"
           fi
 
-          # 生成Hugo主配置
           cat > config.toml << EOL
-          baseURL = "https://$domain"      # 动态基础URL
-          languageCode = "zh-cn"           # 中文语言配置
-          title = "${{ github.repository_owner }}'s Space" # 个性化标题
-          theme = "PaperMod"               # 指定主题
+          baseURL = "https://$domain"
+          languageCode = "zh-cn"
+          title = "${{ github.repository_owner }}'s Space"
+          theme = "PaperMod"
 
           [params]
-            mainSections = ["post"]        # 主内容区配置
-            defaultTheme = "auto"          # 自动切换日间/夜间模式
-            ShowReadingTime = true         # 显示阅读时间
-            ShowShareButtons = false       # 关闭分享按钮
-            ShowPostNavLinks = true        # 显示文章导航
-            ShowBreadCrumbs = true         # 显示面包屑导航
-            ShowCodeCopyButtons = true     # 显示代码复制按钮
-            ShowToc = true                 # 显示目录
+            # 指定 mainSections 只有一个: "post"
+            mainSections = ["post"]
+            defaultTheme = "auto"
+            ShowReadingTime = true
+            ShowShareButtons = false
+            ShowPostNavLinks = true
+            ShowBreadCrumbs = true
+            ShowCodeCopyButtons = true
+            ShowToc = true
 
             [params.homeInfoParams]
               Title = "欢迎来到 ${{ github.repository_owner }} 的文档站"
@@ -175,10 +186,10 @@ jobs:
               url = "https://github.com/${{ github.repository_owner }}"
 
           [outputs]
-            home = ["HTML", "RSS", "JSON"] # 多格式输出
+            home = ["HTML", "RSS", "JSON"]
 
           [taxonomies]
-            category = "categories"        # 分类系统配置
+            category = "categories"
             tag = "tags"
 
           [menu]
@@ -190,23 +201,40 @@ jobs:
             ]
           EOL
 
-          # 创建必要目录
+          # 至少留个 content 目录
           mkdir -p content
 
-          # 生成搜索页
+          # 搜索页面
           cat > content/search.md << EOL
           ---
           title: "Search"
-          layout: "search"       # 使用主题的搜索布局
+          layout: "search"
           summary: "search"
           placeholder: "搜索文章..."
           ---
           EOL
 
-          # 生成归档页
+          # 归档页面
           cat > content/archives.md << EOL
           ---
           title: "Archives"
-          layout: "archives"     # 使用主题的归档布局
+          layout: "archives"
           url: "/archives/"
-      
+          summary: "archives"
+          ---
+          EOL
+
+      # 7. Hugo 构建
+      - name: Build site
+        run: hugo --minify
+
+      # 8. 上传构建产物
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+      # 9. 部署到 GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
