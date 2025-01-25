@@ -92,12 +92,12 @@ jobs:
               local filenameOnly
               filenameOnly=$(basename "$file")
               cat <<EOF > "$file.tmp"
----
-title: "${filenameOnly%.*}"
-date: $date_commit
-type: "post"
----
-EOF
+              ---
+              title: "${filenameOnly%.*}"
+              date: $date_commit
+              type: "post"
+              ---
+              EOF
               cat "$file" >> "$file.tmp"
               mv "$file.tmp" "$file"
             fi
