@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # 需要写权限来提交更新
+  contents: read
   pages: write
   id-token: write
 
@@ -18,132 +18,72 @@ concurrency:
 
 jobs:
   build-deploy:
-    # 如果是 GitHub Actions Bot 的提交，则跳过整个 job，从而避免死循环
-    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
-    
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
+    env:
+      CUSTOM_DOMAIN: ${{ github.event.repository.pages.cname }}
+    
     steps:
-      # 1. 检出代码
+      # 1. 检出代码（需要完整提交历史）
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 如果有子模块需要同步，可以保留 'recursive'
           submodules: 'recursive'
+          fetch-depth: 0  # 关键修改：获取完整提交历史
 
-      # 2. 安装 jq (脚本里要用到), 并做 front matter 处理
-      - name: Update Front Matter
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq
-
-          # 配置 Git 以便能提交
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-          # 定义一个函数，用于获取某个文件第一次commit的时间(ISO 8601格式)
-          first_commit_date() {
-            local file="$1"
-            # --diff-filter=A 只看 "Added" 的 commit，这样就能拿到真正第一次出现此文件时的时间
-            # --format=%aI 使用 author date(ISO 8601)
-            git log --diff-filter=A --format=%aI -- "$file" | tail -n 1
-          }
-
-          # 函数：更新或添加 front matter
-          update_front_matter() {
-            local file="$1"
-            local date_commit="$2"
-
-            # 判断是否已有 front matter（简单判断：开头三行内是否有 "---" 块）
-            # 这里为了示例，只做一个非常简单的判定，更严谨可以做更深入的解析
-            if head -n 3 "$file" | grep -q "^---"; then
-              # 已有 front matter，只更新 date 字段
-              # 注意这里用 sed 或其他方式，视你如何解析 YAML
-              # 我们在 front matter 范围内(---到---之间)寻找 date: 并替换
-              # 如果未找到 date 这一行，就插入一行；若找到了就替换
-              awk -v newdate="$date_commit" '
-                BEGIN { inFM=0 }
-                {
-                  if(/^---$/) {
-                    # 进入或离开 front matter 区域
-                    if(inFM==0) { inFM=1 } else { inFM=0 }
-                    print $0
-                    next
-                  }
-                  if(inFM==1) {
-                    if($0 ~ /^date:\s*/) {
-                      print "date: " newdate
-                    } else {
-                      print $0
-                    }
-                  } else {
-                    print $0
-                  }
-                }
-              ' "$file" > "$file.tmp"
-
-              mv "$file.tmp" "$file"
-            else
-              # 没有 front matter，则添加
-              # 因为用户要求统一使用 type = "post"
-              # 你可根据自身仓库结构，提取 title, categories 等做更细致的处理
-              local filenameOnly
-              filenameOnly=$(basename "$file")
-              cat <<EOF > "$file.tmp"
-              ---
-              title: "${filenameOnly%.*}"
-              date: $date_commit
-              type: "post"
-              ---
-              EOF
-              cat "$file" >> "$file.tmp"
-              mv "$file.tmp" "$file"
-            fi
-          }
-
-          # 扫描仓库中所有 .md 文件（若要排除 README，可加 ! -name "README.md"）
-          # 这里示例不排除 README.md，若要排除请自行添加过滤条件
-          find . -type f -name "*.md" -not -path "./.github/*" | while read -r mdfile; do
-            # 获取第一次 commit 的时间
-            commitDate=$(first_commit_date "$mdfile")
-            # 如果找不到(极少数情况，如文件太新或 git log 不完整)，可用当前时间替代
-            if [ -z "$commitDate" ]; then
-              commitDate=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            fi
-
-            update_front_matter "$mdfile" "$commitDate"
-          done
-
-          # 判断是否有变更需要提交
-          if [ -n "$(git status --porcelain)" ]; then
-            git add .
-            git commit -m "chore: update front matter"
-            # 提交到远程，下一次 push 的提交者是 github-actions[bot]，会触发一次 push 事件，但因上面 if 条件会跳过执行
-            git push
-          else
-            echo "No front matter changes to commit."
-          fi
-
-      # 3. 设置 Hugo
+      # 2. 设置 Hugo
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
         with:
           hugo-version: 'latest'
           extended: true
 
-      # 4. 配置 GitHub Pages
+      # 3. 配置 GitHub Pages
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # 5. 下载主题（此处以 PaperMod 为例）并复制到 themes 目录
-      - name: Download PaperMod theme
+      # 4. 处理文档并生成 front matter
+      - name: Process Markdown files
         run: |
-          mkdir -p themes
-          git clone https://github.com/adityatelange/hugo-PaperMod.git themes/PaperMod
+          generate_front_matter() {
+            local file="$1"
+            local title=$(basename "$file" .md)
+            
+            # 获取首次提交时间（ISO 8601 格式）
+            local first_commit_date=$(git log --reverse --pretty=format:%ad --date=iso-strict -- "$file" | head -1)
+            
+            # 处理分类路径（去掉开头的./）
+            local category=$(dirname "$file" | sed 's|^\./||')
 
-      # 6. 获取自定义域名
+            # 保留已有 front matter
+            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
+              mkdir -p "content/$category"
+              cp "$file" "content/$category/$title.md"
+              return
+            fi
+
+            # 生成新 front matter
+            {
+              echo "---"
+              echo "title: \"$title\""
+              echo "date: $first_commit_date"
+              echo "categories: [\"$category\"]"
+              echo "type: \"post\""
+              echo "---"
+              cat "$file"
+            } > "content/$category/$title.md"
+          }
+
+          # 遍历所有 md 文件（排除 README.md 且保留目录结构）
+          find . -type f -name "*.md" ! -name "README.md" | while read fullpath; do
+            # 统一处理路径格式（去掉开头的./）
+            filepath=$(echo "$fullpath" | sed 's|^\./||')
+            generate_front_matter "$filepath"
+          done
+
+      # 5. 获取自定义域名
       - name: Retrieve custom domain
         id: fetch-domain
         run: |
@@ -152,7 +92,7 @@ jobs:
           | jq -r '.cname // ""')
           echo "CUSTOM_DOMAIN=$customDomain" >> $GITHUB_ENV
 
-      # 7. 创建并写入 Hugo 配置
+      # 6. 创建并写入 Hugo 配置
       - name: Configure Hugo
         run: |
           if [ -n "$CUSTOM_DOMAIN" ]; then
@@ -170,9 +110,7 @@ jobs:
           theme = "PaperMod"
 
           [params]
-            # 这里指定了 mainSections 只有 "post"
             mainSections = ["post"]
-
             defaultTheme = "auto"
             ShowReadingTime = true
             ShowShareButtons = false
@@ -205,8 +143,8 @@ jobs:
             ]
           EOL
 
+          # 创建必要页面
           mkdir -p content
-
           cat > content/search.md << EOL
           ---
           title: "Search"
@@ -225,17 +163,17 @@ jobs:
           ---
           EOL
 
-      # 8. Hugo 构建
+      # 7. Hugo 构建
       - name: Build site
         run: hugo --minify
 
-      # 9. 上传构建产物
+      # 8. 上传构建产物
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./public
 
-      # 10. 部署到 GitHub Pages
+      # 9. 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
