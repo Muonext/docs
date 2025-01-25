@@ -26,7 +26,7 @@ jobs:
       CUSTOM_DOMAIN: ${{ github.event.repository.pages.cname }}
     
     steps:
-      # 1. 检出代码（需要完整提交历史）
+      # 1. 检出代码（需要完整历史记录）
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -44,50 +44,41 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # 4. 处理文档并生成 front matter（完整路径修复版）
-      - name: Process Markdown files
+      # 4. 下载 PaperMod 主题 & 处理文档
+      - name: Download PaperMod theme
         run: |
-          # 处理函数
-          process_markdown() {
-            local src_file="$1"
-            local relative_path="${src_file#./}"  # 去除开头的./
-            
-            # 目标路径构造
-            local target_dir="content/$(dirname "$relative_path")"
-            local target_file="$target_dir/$(basename "$src_file")"
+          mkdir -p themes
+          git clone https://github.com/adityatelange/hugo-PaperMod.git themes/PaperMod
+          
+          generate_front_matter() {
+            local file="$1"
+            local title=$(basename "$file" .md)
+            local date=$(git log --diff-filter=A --format=%aI -- "$file" | head -1)
+            local category=$(dirname "$file" | sed 's|^./||')
 
-            # 创建目标目录
-            mkdir -p "$target_dir"
-
-            # 获取首次提交时间
-            local first_commit_date=$(git log --reverse --pretty=format:%ad --date=iso-strict -- "$src_file" | head -1)
-
-            # 保留已有 front matter
-            if grep -q '^---$' "$src_file"; then
-              cp "$src_file" "$target_file"
+            # 如果已有 front matter，直接复制
+            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
+              cp "$file" "content/$category/$title.md"
               return
             fi
 
-            # 生成新 front matter
-            local title=$(basename "$src_file" .md | sed 's/^[0-9]\+-//')  # 去除序号
-            local category=$(dirname "$relative_path")
-
-            # 写入处理后的文件
+            # 若没有 front matter，自动生成
             {
               echo "---"
               echo "title: \"$title\""
-              echo "date: $first_commit_date"
+              echo "date: $date"
               echo "categories: [\"$category\"]"
               echo "type: \"post\""
               echo "---"
-              cat "$src_file"
-            } > "$target_file"
+              cat "$file"
+            } > "content/$category/$title.md"
           }
 
-          # 主处理流程
+          # 遍历所有 md 文件（排除 README.md）
           find . -type f -name "*.md" ! -name "README.md" | while read file; do
-            echo "Processing: $file"
-            process_markdown "$file"
+            dir=$(dirname "$file" | sed 's|^./||')
+            mkdir -p "content/$dir"
+            generate_front_matter "$file"
           done
 
       # 5. 获取自定义域名
@@ -102,7 +93,6 @@ jobs:
       # 6. 创建并写入 Hugo 配置
       - name: Configure Hugo
         run: |
-          # 域名处理逻辑
           if [ -n "$CUSTOM_DOMAIN" ]; then
             domain="$CUSTOM_DOMAIN"
           else
@@ -111,7 +101,6 @@ jobs:
             domain="$owner.github.io/$repo"
           fi
 
-          # 生成主配置文件
           cat > config.toml << EOL
           baseURL = "https://$domain"
           languageCode = "zh-cn"
@@ -120,6 +109,7 @@ jobs:
 
           [params]
             mainSections = ["post"]
+
             defaultTheme = "auto"
             ShowReadingTime = true
             ShowShareButtons = false
@@ -152,8 +142,8 @@ jobs:
             ]
           EOL
 
-          # 创建必要页面
           mkdir -p content
+
           cat > content/search.md << EOL
           ---
           title: "Search"
