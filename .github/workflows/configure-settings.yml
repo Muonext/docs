@@ -1,0 +1,104 @@
+name: Configure Hugo Settings
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Retrieve custom domain
+        id: fetch-domain
+        run: |2
+          customDomain=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/pages \
+            | jq -r '.cname // ""')
+          echo "CUSTOM_DOMAIN=$customDomain" >> $GITHUB_ENV
+
+      - name: Create Hugo config
+        id: configure
+        env:
+          HUGO_CONFIG: |
+            baseURL = "https://__DOMAIN__"
+            languageCode = "zh-cn"
+            title = "__OWNER__'s Space"
+            theme = "PaperMod"
+
+            [params]
+            mainSections = ["post"]
+            defaultTheme = "auto"
+            ShowReadingTime = true
+            ShowShareButtons = false
+            ShowPostNavLinks = true
+            ShowBreadCrumbs = true
+            ShowCodeCopyButtons = true
+            ShowToc = true
+
+            [params.homeInfoParams]
+            Title = "欢迎来到 __OWNER__ 的文档站"
+            Content = "在喧嚣时代中静心思考，用文字传递理性与希望。"
+
+            [[params.socialIcons]]
+            name = "github"
+            url = "https://github.com/__OWNER__"
+
+            [outputs]
+            home = ["HTML", "RSS", "JSON"]
+
+            [taxonomies]
+            category = "categories"
+            tag = "tags"
+
+            [menu]
+            main = [
+            {identifier = "archives", name = "Archives", url = "/archives/", weight = 10},
+            {identifier = "categories", name = "Categories", url = "/categories/", weight = 20},
+            {identifier = "search", name = "Search", url = "/search/", weight = 30},
+            {identifier = "tags", name = "Tags", url = "/tags/", weight = 40}
+            ]
+        run: |2
+          # 设置域名
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            domain="$CUSTOM_DOMAIN"
+          else
+            owner="${GITHUB_REPOSITORY_OWNER}"
+            repo="$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)"
+            domain="$owner.github.io/$repo"
+          fi
+
+          # 检查并创建配置文件
+          if [ ! -f ".github/hugo.toml" ]; then
+            echo "创建 hugo.toml 配置文件"
+            mkdir -p .github
+            echo "$HUGO_CONFIG" > .github/hugo.toml
+            
+            # 替换变量
+            sed -i "s|__DOMAIN__|$domain|g" .github/hugo.toml
+            sed -i "s|__OWNER__|${GITHUB_REPOSITORY_OWNER}|g" .github/hugo.toml
+            
+            echo "已创建 hugo.toml 配置文件"
+          else
+            echo "hugo.toml 配置文件已存在，跳过创建"
+          fi
+
+      - name: Commit changes
+        if: success()
+        run: |2
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          if ! git diff --quiet --staged; then
+            git commit -m "chore: configure hugo settings"
+            git push
+          else
+            echo "没有需要提交的更改"
+          fi

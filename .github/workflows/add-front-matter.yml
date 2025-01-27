@@ -28,53 +28,49 @@ jobs:
       - name: Process Documents
         id: process
         run: |
-          # 辅助函数: 记录日志
+          # 创建日志目录
+          mkdir -p .logs
+          
+          # 初始化计数器
+          TOTAL=0
+          PROCESSED=0
+          FAILED=0
+          
           log() {
-            local level="$1"
-            local message="$2"
-            echo "[$level] $message" | tee -a .logs/process.log
+            echo "[$1] $2" | tee -a .logs/process.log
           }
-
-          # 辅助函数: 获取文件日期
-          get_file_date() {
-            local file="$1"
-            # 尝试获取git提交时间,失败则使用当前时间
-            git log -1 --format="%aI" -- "$file" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ"
-          }
-
-          # 辅助函数: 检查是否已有front matter
-          has_front_matter() {
-            local file="$1"
-            if [ ! -f "$file" ]; then
-              return 1
-            fi
-            sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"
-          }
-
-          # 主函数: 生成front matter
-          generate_front_matter() {
+          
+          process_file() {
             local file="$1"
             local title=$(basename "$file" .md)
-            local utc_date=$(get_file_date "$file")
-            local date=$(TZ='Asia/Shanghai' date -d "$utc_date" +"%Y-%m-%dT%H:%M:%S+08:00")
-            local category=$(dirname "$file" | sed 's|^./||')
+            local utc_date
+            local date
+            local category
             
-            if has_front_matter "$file"; then
+            # 获取最后提交时间
+            utc_date=$(git log -1 --format="%aI" -- "$file" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+            date=$(TZ='Asia/Shanghai' date -d "$utc_date" +"%Y-%m-%dT%H:%M:%S+08:00")
+            category=$(dirname "$file" | sed 's|^./||')
+            
+            # 检查是否已有 front matter
+            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
               log "INFO" "跳过 $file: 已存在 front matter"
               return 0
             fi
-
+            
             log "INFO" "处理文件: $file"
             
+            # 检查文件权限
             if [ ! -w "$file" ]; then
               log "ERROR" "无法写入文件: $file"
               return 1
-            }
-
-            # 创建临时文件
-            local temp_file=$(mktemp)
-            trap 'rm -f "$temp_file"' EXIT
+            fi
             
+            # 创建临时文件
+            local temp_file
+            temp_file=$(mktemp)
+            
+            # 生成新内容
             {
               echo "---"
               echo "title: \"$title\""
@@ -84,42 +80,38 @@ jobs:
               echo "---"
               cat "$file"
             } > "$temp_file"
-
-            # 安全地移动文件
+            
+            # 更新文件
             if mv "$temp_file" "$file"; then
               log "SUCCESS" "已添加 front matter 到 $file"
               return 0
             else
+              rm -f "$temp_file"
               log "ERROR" "更新文件失败: $file"
               return 1
             fi
           }
-
-          # 计数器
-          total=0
-          processed=0
-          failed=0
-
-          # 遍历并处理文件
+          
+          # 处理所有 markdown 文件
           while IFS= read -r file; do
-            ((total++))
-            if generate_front_matter "$file"; then
-              ((processed++))
+            TOTAL=$((TOTAL + 1))
+            if process_file "$file"; then
+              PROCESSED=$((PROCESSED + 1))
             else
-              ((failed++))
+              FAILED=$((FAILED + 1))
             fi
           done < <(find . -type f -name "*.md" ! -name "README.md")
-
+          
           # 输出统计信息
           {
-            echo "总文件数: $total"
-            echo "成功处理: $processed"
-            echo "处理失败: $failed"
+            echo "总文件数: $TOTAL"
+            echo "成功处理: $PROCESSED"
+            echo "处理失败: $FAILED"
           } | tee -a .logs/process.log
-
-          # 设置输出变量
-          echo "processed=$processed" >> "$GITHUB_OUTPUT"
-          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          
+          # 设置 GitHub Actions 输出
+          echo "processed=$PROCESSED" >> "$GITHUB_OUTPUT"
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
 
       - name: Commit changes
         if: steps.process.outputs.processed > 0
