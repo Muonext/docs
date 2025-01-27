@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 2 * * *'  # 每日UTC 2点自动构建
+    - cron: '0 2 * * *'  # UTC 每天2点
   workflow_dispatch:
 
 permissions:
@@ -21,8 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deploy-pages.outputs.page_url }}
-    
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      CUSTOM_DOMAIN: ${{ github.event.repository.pages.cname }}
+
     steps:
       # 基础配置
       - name: Checkout code
@@ -103,5 +105,4 @@ jobs:
           path: ./public
 
       - name: Deploy to GitHub Pages
-        id: deploy-pages
         uses: actions/deploy-pages@v4
