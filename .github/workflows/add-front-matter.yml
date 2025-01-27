@@ -14,22 +14,67 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up environment
+        run: |
+          # 设置错误处理
+          set -euo pipefail
+          
+          # 创建日志目录
+          mkdir -p .logs
 
       - name: Process Documents
+        id: process
         run: |
-          # 处理文档 front matter
+          # 辅助函数: 记录日志
+          log() {
+            local level="$1"
+            local message="$2"
+            echo "[$level] $message" | tee -a .logs/process.log
+          }
+
+          # 辅助函数: 获取文件日期
+          get_file_date() {
+            local file="$1"
+            # 尝试获取git提交时间,失败则使用当前时间
+            git log -1 --format="%aI" -- "$file" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ"
+          }
+
+          # 辅助函数: 检查是否已有front matter
+          has_front_matter() {
+            local file="$1"
+            if [ ! -f "$file" ]; then
+              return 1
+            fi
+            sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"
+          }
+
+          # 主函数: 生成front matter
           generate_front_matter() {
             local file="$1"
             local title=$(basename "$file" .md)
-            # 获取文件最后一次提交的时间并转换为北京时间
-            local utc_date=$(git log -1 --format="%aI" -- "$file" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+            local utc_date=$(get_file_date "$file")
             local date=$(TZ='Asia/Shanghai' date -d "$utc_date" +"%Y-%m-%dT%H:%M:%S+08:00")
             local category=$(dirname "$file" | sed 's|^./||')
-            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
-              return
+            
+            if has_front_matter "$file"; then
+              log "INFO" "跳过 $file: 已存在 front matter"
+              return 0
             fi
-            # 若没有 front matter，自动生成
-            temp_file=$(mktemp)
+
+            log "INFO" "处理文件: $file"
+            
+            if [ ! -w "$file" ]; then
+              log "ERROR" "无法写入文件: $file"
+              return 1
+            }
+
+            # 创建临时文件
+            local temp_file=$(mktemp)
+            trap 'rm -f "$temp_file"' EXIT
+            
             {
               echo "---"
               echo "title: \"$title\""
@@ -39,18 +84,68 @@ jobs:
               echo "---"
               cat "$file"
             } > "$temp_file"
-            mv "$temp_file" "$file"
+
+            # 安全地移动文件
+            if mv "$temp_file" "$file"; then
+              log "SUCCESS" "已添加 front matter 到 $file"
+              return 0
+            else
+              log "ERROR" "更新文件失败: $file"
+              return 1
+            fi
           }
-          
-          # 遍历所有 md 文件（排除 README.md）
-          find . -type f -name "*.md" ! -name "README.md" | while read file; do
-            generate_front_matter "$file"
-          done
+
+          # 计数器
+          total=0
+          processed=0
+          failed=0
+
+          # 遍历并处理文件
+          while IFS= read -r file; do
+            ((total++))
+            if generate_front_matter "$file"; then
+              ((processed++))
+            else
+              ((failed++))
+            fi
+          done < <(find . -type f -name "*.md" ! -name "README.md")
+
+          # 输出统计信息
+          {
+            echo "总文件数: $total"
+            echo "成功处理: $processed"
+            echo "处理失败: $failed"
+          } | tee -a .logs/process.log
+
+          # 设置输出变量
+          echo "processed=$processed" >> "$GITHUB_OUTPUT"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
 
       - name: Commit changes
+        if: steps.process.outputs.processed > 0
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          
+          # 添加修改的文件和日志
           git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "chore: add front matter to documents"
-          git push
+          
+          # 如果有更改则提交
+          if ! git diff --quiet --cached; then
+            git commit -m "chore: add front matter to documents
+            
+            处理文件数: ${{ steps.process.outputs.processed }}
+            失败数: ${{ steps.process.outputs.failed }}
+            
+            详细日志请查看 Actions 运行记录"
+            
+            # 推送更改
+            if git push; then
+              echo "成功推送更改到仓库"
+            else
+              echo "推送更改失败"
+              exit 1
+            fi
+          else
+            echo "没有需要提交的更改"
+          fi
