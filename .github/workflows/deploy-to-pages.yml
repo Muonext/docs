@@ -46,7 +46,7 @@ jobs:
       - name: Create required pages
         run: |2
           # 创建必要的目录
-          mkdir -p content
+          mkdir -p content static
 
           # 创建搜索页面
           cat > content/search.md << 'EOL'
@@ -68,13 +68,23 @@ jobs:
           ---
           EOL
 
+      - name: Setup static files
+        run: |2
+          # 复制 favicon
+          if [ -f ".github/static/favicon.svg" ]; then
+            cp .github/static/favicon.svg static/favicon.svg
+          elif [ -f ".github/static/favicon.ico" ]; then
+            cp .github/static/favicon.ico static/favicon.ico
+          fi
+
       - name: Copy and process content
         run: |2
-          # 复制所有非隐藏文件到 content 目录，排除 README.md
+          # 复制所有非隐藏文件到 content 目录，排除系统文件
           find . -type f \
             ! -path "*/\.*" \
             ! -path "*/themes/*" \
             ! -path "*/content/*" \
+            ! -path "*/static/*" \
             ! -path "*/public/*" \
             ! -name "README.md" \
             ! -name "hugo.toml" \
