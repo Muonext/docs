@@ -2,9 +2,10 @@ name: Deploy Hugo site to Pages
 
 on:
   workflow_run:
-    workflows: ["Add Front Matter", "Configure Hugo Settings"]
+    workflows: ["Configure Hugo Settings"]
     types:
       - completed
+    branches: [main]
   workflow_dispatch:
 
 permissions:
