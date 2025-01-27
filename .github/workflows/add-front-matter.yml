@@ -1,0 +1,54 @@
+name: Add Front Matter
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  add-front-matter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Process Documents
+        run: |
+          # 处理文档 front matter
+          generate_front_matter() {
+            local file="$1"
+            local title=$(basename "$file" .md)
+            local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            local category=$(dirname "$file" | sed 's|^./||')
+            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
+              return
+            fi
+            # 若没有 front matter，自动生成
+            temp_file=$(mktemp)
+            {
+              echo "---"
+              echo "title: \"$title\""
+              echo "date: $date"
+              echo "categories: [\"$category\"]"
+              echo "type: \"post\""
+              echo "---"
+              cat "$file"
+            } > "$temp_file"
+            mv "$temp_file" "$file"
+          }
+          
+          # 遍历所有 md 文件（排除 README.md）
+          find . -type f -name "*.md" ! -name "README.md" | while read file; do
+            generate_front_matter "$file"
+          done
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: add front matter to documents"
+          git push

@@ -1,8 +1,12 @@
 name: Deploy Hugo site to Pages
 
 on:
-  push:
-    branches: [ main ]
+  # 在 add-front-matter 工作流完成后触发
+  workflow_run:
+    workflows: ["Add Front Matter"]
+    types:
+      - completed
+    branches: [main]
   schedule:
     - cron: '0 2 * * *'  # UTC 每天2点
   workflow_dispatch:
@@ -43,38 +47,12 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      # 4. 下载 PaperMod 主题 & 处理文档
+      # 4. 下载 PaperMod 主题
       - name: Download PaperMod theme
         run: |
           mkdir -p themes
           git clone https://github.com/adityatelange/hugo-PaperMod.git themes/PaperMod
-          # 处理文档 front matter
-          generate_front_matter() {
-            local file="$1"
-            local title=$(basename "$file" .md)
-            local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            local category=$(dirname "$file" | sed 's|^./||')
-            if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
-              cp "$file" "content/$category/$title.md"
-              return
-            fi
-            # 若没有 front matter，自动生成
-            {
-              echo "---"
-              echo "title: \"$title\""
-              echo "date: $date"
-              echo "categories: [\"$category\"]"
-              echo "type: \"post\""
-              echo "---"
-              cat "$file"
-            } > "content/$category/$title.md"
-          }
-          # 遍历所有 md 文件（排除 README.md）
-          find . -type f -name "*.md" ! -name "README.md" | while read file; do
-            dir=$(dirname "$file" | sed 's|^./||')
-            mkdir -p "content/$dir"
-            generate_front_matter "$file"
-          done
+
       # 5. 获取自定义域名
       - name: Retrieve custom domain
         id: fetch-domain
@@ -83,6 +61,7 @@ jobs:
           https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/pages \
           | jq -r '.cname // ""')
           echo "CUSTOM_DOMAIN=$customDomain" >> $GITHUB_ENV
+
       # 6. 创建并写入 Hugo 配置
       - name: Configure Hugo
         run: |
@@ -99,8 +78,6 @@ jobs:
           title = "${{ github.repository_owner }}'s Space"
           theme = "PaperMod"
           [params]
-            # 指定 mainSections 只有一个: "post"
-            # 因为我们在上面把所有文件都设为 type = "post"
             mainSections = ["post"]
             defaultTheme = "auto"
             ShowReadingTime = true
@@ -117,7 +94,6 @@ jobs:
               url = "https://github.com/${{ github.repository_owner }}"
           [outputs]
             home = ["HTML", "RSS", "JSON"]
-          # 想自定义分类和标签名称，可在这里改
           [taxonomies]
             category = "categories"
             tag = "tags"
@@ -129,9 +105,9 @@ jobs:
               {identifier = "tags", name = "Tags", url = "/tags/", weight = 40}
             ]
           EOL
-          # 至少留个 content 目录
+
+          # 创建必要的页面
           mkdir -p content
-          # 搜索页面
           cat > content/search.md << EOL
           ---
           title: "Search"
@@ -140,7 +116,7 @@ jobs:
           placeholder: "搜索文章..."
           ---
           EOL
-          # 归档页面
+
           cat > content/archives.md << EOL
           ---
           title: "Archives"
@@ -149,17 +125,27 @@ jobs:
           summary: "archives"
           ---
           EOL
-      # 7. Hugo 构建
+
+      # 7. 复制文档到 content 目录
+      - name: Copy documents
+        run: |
+          find . -type f -name "*.md" ! -name "README.md" | while read file; do
+            dir=$(dirname "$file" | sed 's|^./||')
+            mkdir -p "content/$dir"
+            cp "$file" "content/$dir/"
+          done
+
+      # 8. Hugo 构建
       - name: Build site
         run: hugo --minify
 
-      # 8. 上传构建产物
+      # 9. 上传构建产物
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./public
 
-      # 9. 部署到 GitHub Pages
+      # 10. 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
