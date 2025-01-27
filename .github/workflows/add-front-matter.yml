@@ -21,7 +21,9 @@ jobs:
           generate_front_matter() {
             local file="$1"
             local title=$(basename "$file" .md)
-            local date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            # 获取文件最后一次提交的时间并转换为北京时间
+            local utc_date=$(git log -1 --format="%aI" -- "$file" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+            local date=$(TZ='Asia/Shanghai' date -d "$utc_date" +"%Y-%m-%dT%H:%M:%S+08:00")
             local category=$(dirname "$file" | sed 's|^./||')
             if sed -n '1{/^---$/h}; /^---$/{x;p;q}; H' "$file" | grep -q "^---$"; then
               return
