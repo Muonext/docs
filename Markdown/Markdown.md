@@ -96,7 +96,7 @@ Markdown 支持两种链接方式：
 ```markdown
 ![图片描述](图片地址 "可选标题")
 ```
-例：![IMG test](https://raw.githubusercontent.com/Muonext/docs/refs/heads/main/Markdown/avatar.png "Avatar")
+例：![IMG test](./avatar.png "Avatar")
 ## 代码
 
 ### 行内代码
