@@ -39,13 +39,10 @@ jobs:
             echo "下载默认 favicon"
             curl -L https://raw.githubusercontent.com/Protomyst/Resources/main/favicon.svg -o .github/static/favicon.svg
             echo "FAVICON_TYPE=svg" >> $GITHUB_ENV
-            echo "FAVICON_PATH=favicon.svg" >> $GITHUB_ENV
           elif [ -f ".github/static/favicon.svg" ]; then
             echo "FAVICON_TYPE=svg" >> $GITHUB_ENV
-            echo "FAVICON_PATH=favicon.svg" >> $GITHUB_ENV
           elif [ -f ".github/static/favicon.ico" ]; then
             echo "FAVICON_TYPE=ico" >> $GITHUB_ENV
-            echo "FAVICON_PATH=favicon.ico" >> $GITHUB_ENV
           fi
 
       - name: Create Hugo config
@@ -67,15 +64,11 @@ jobs:
             ShowCodeCopyButtons = true
             ShowToc = true
 
-            # 图标配置
             [params.assets]
-            favicon = "/__FAVICON_PATH__"
-            favicon16x16 = "/__FAVICON_PATH__"
-            favicon32x32 = "/__FAVICON_PATH__"
-            apple_touch_icon = "/__FAVICON_PATH__"
-
-            [params.profileMode]
-            enabled = false
+            favicon = "/favicon.__FAVICON_TYPE__"
+            favicon16x16 = "/favicon.__FAVICON_TYPE__"
+            favicon32x32 = "/favicon.__FAVICON_TYPE__"
+            apple_touch_icon = "/favicon.__FAVICON_TYPE__"
 
             [params.homeInfoParams]
             Title = "欢迎来到 __OWNER__ 的文档站"
@@ -99,9 +92,6 @@ jobs:
             {identifier = "search", name = "Search", url = "/search/", weight = 30},
             {identifier = "tags", name = "Tags", url = "/tags/", weight = 40}
             ]
-
-            [markup.goldmark.renderer]
-            unsafe = true
         run: |2
           # 设置域名
           if [ -n "$CUSTOM_DOMAIN" ]; then
@@ -121,7 +111,7 @@ jobs:
             # 替换变量
             sed -i "s|__DOMAIN__|$domain|g" .github/hugo.toml
             sed -i "s|__OWNER__|${GITHUB_REPOSITORY_OWNER}|g" .github/hugo.toml
-            sed -i "s|__FAVICON_PATH__|${FAVICON_PATH}|g" .github/hugo.toml
+            sed -i "s|__FAVICON_TYPE__|${FAVICON_TYPE}|g" .github/hugo.toml
             
             echo "已创建 hugo.toml 配置文件"
           else

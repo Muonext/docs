@@ -46,7 +46,7 @@ jobs:
       - name: Create required pages
         run: |2
           # 创建必要的目录
-          mkdir -p content layouts/partials static
+          mkdir -p content static
 
           # 创建搜索页面
           cat > content/search.md << 'EOL'
@@ -70,16 +70,12 @@ jobs:
 
       - name: Setup static files
         run: |2
-          # 复制 favicon 到根静态目录
+          # 复制 favicon
           if [ -f ".github/static/favicon.svg" ]; then
             cp .github/static/favicon.svg static/favicon.svg
           elif [ -f ".github/static/favicon.ico" ]; then
             cp .github/static/favicon.ico static/favicon.ico
           fi
-          
-          # 创建一个空的 assets/css/extended/blank.css 文件
-          mkdir -p static/assets/css/extended
-          touch static/assets/css/extended/blank.css
 
       - name: Copy and process content
         run: |2
@@ -89,7 +85,6 @@ jobs:
             ! -path "*/themes/*" \
             ! -path "*/content/*" \
             ! -path "*/static/*" \
-            ! -path "*/layouts/*" \
             ! -path "*/public/*" \
             ! -name "README.md" \
             ! -name "hugo.toml" \
@@ -109,11 +104,7 @@ jobs:
           fi
 
       - name: Build site
-        run: |2
-          hugo --gc --minify
-          ls -la public/
-          echo "构建完成，检查生成的文件："
-          find public/ -type f -name "favicon*"
+        run: hugo --gc --minify
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
