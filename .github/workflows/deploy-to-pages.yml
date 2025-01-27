@@ -78,7 +78,56 @@ jobs:
             -exec cp --parents {} content/ \;
 
           # 修复 Markdown 文件中的相对引用路径
-          find content -type f -name "*.md" -exec sed -i 's|\./|../|g' {} +
+          process_markdown() {
+            local file="$1"
+            # 创建临时文件
+            local temp_file=$(mktemp)
+            
+            # 使用 awk 处理 Markdown 文件
+            awk '
+              # 初始化变量
+              BEGIN { in_code_block = 0 }
+              
+              # 检测代码块
+              /^```/ { in_code_block = !in_code_block; print; next }
+              
+              # 在代码块内直接打印
+              in_code_block { print; next }
+              
+              # 处理图片链接: ![...](./path)
+              /!\[.*\]\(\.\/[^)]*\)/ {
+                gsub(/\(\.\//, "\\(../", $0)
+                print
+                next
+              }
+              
+              # 处理普通链接: [...]（./path)
+              /\[.*\]\(\.\/[^)]*\)/ {
+                gsub(/\(\.\//, "\\(../", $0)
+                print
+                next
+              }
+              
+              # 处理HTML图片标签: <img src="./path" ...>
+              /<img[^>]*src="\.\/[^"]*"[^>]*>/ {
+                gsub(/src="\.\//, "src=\\\"../", $0)
+                print
+                next
+              }
+              
+              # 其他行直接打印
+              { print }
+            ' "$file" > "$temp_file"
+            
+            # 替换原文件
+            mv "$temp_file" "$file"
+          }
+
+          # 处理所有 Markdown 文件
+          find content -type f -name "*.md" -print0 | while IFS= read -r -d '' file; do
+            echo "处理文件: $file"
+            process_markdown "$file"
+          done
 
       - name: Use configured hugo.toml
         run: |2
