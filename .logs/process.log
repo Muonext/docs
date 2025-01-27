@@ -38,3 +38,9 @@
 总文件数: 2
 成功处理: 2
 处理失败: 0
+[INFO] 跳过 ./使用指南/使用指南.md: 已存在 front matter
+[INFO] 处理文件: ./Markdown/Markdown.md
+[SUCCESS] 已添加 front matter 到 ./Markdown/Markdown.md
+总文件数: 2
+成功处理: 2
+处理失败: 0
