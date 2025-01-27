@@ -31,20 +31,6 @@ jobs:
             | jq -r '.cname // ""')
           echo "CUSTOM_DOMAIN=$customDomain" >> $GITHUB_ENV
 
-      - name: Setup favicon
-        id: favicon
-        run: |2
-          mkdir -p .github/static
-          if [ ! -f ".github/static/favicon.svg" ] && [ ! -f ".github/static/favicon.ico" ]; then
-            echo "下载默认 favicon"
-            curl -L https://raw.githubusercontent.com/Protomyst/Resources/main/favicon.svg -o .github/static/favicon.svg
-            echo "FAVICON_TYPE=svg" >> $GITHUB_ENV
-          elif [ -f ".github/static/favicon.svg" ]; then
-            echo "FAVICON_TYPE=svg" >> $GITHUB_ENV
-          elif [ -f ".github/static/favicon.ico" ]; then
-            echo "FAVICON_TYPE=ico" >> $GITHUB_ENV
-          fi
-
       - name: Create Hugo config
         id: configure
         env:
@@ -63,12 +49,6 @@ jobs:
             ShowBreadCrumbs = true
             ShowCodeCopyButtons = true
             ShowToc = true
-
-            [params.assets]
-            favicon = "/favicon.__FAVICON_TYPE__"
-            favicon16x16 = "/favicon.__FAVICON_TYPE__"
-            favicon32x32 = "/favicon.__FAVICON_TYPE__"
-            apple_touch_icon = "/favicon.__FAVICON_TYPE__"
 
             [params.homeInfoParams]
             Title = "欢迎来到 __OWNER__ 的文档站"
@@ -111,7 +91,6 @@ jobs:
             # 替换变量
             sed -i "s|__DOMAIN__|$domain|g" .github/hugo.toml
             sed -i "s|__OWNER__|${GITHUB_REPOSITORY_OWNER}|g" .github/hugo.toml
-            sed -i "s|__FAVICON_TYPE__|${FAVICON_TYPE}|g" .github/hugo.toml
             
             echo "已创建 hugo.toml 配置文件"
           else
