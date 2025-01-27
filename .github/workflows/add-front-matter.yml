@@ -3,9 +3,6 @@ name: Add Front Matter
 on:
   push:
     branches: [ main ]
-    paths:
-      - '**.md'
-      - '!.github/**'
   workflow_dispatch:
 
 permissions:
