@@ -95,29 +95,40 @@ jobs:
               # 在代码块内直接打印
               in_code_block { print; next }
               
-              # 处理图片链接: ![...](./path)
-              /!\[.*\]\(\.\/[^)]*\)/ {
-                gsub(/\(\.\//, "\\(../", $0)
-                print
-                next
+              {
+                # 处理图片链接: ![...](./path)
+                line = $0
+                while (match(line, /!\[([^\]])*\]\(\.\/[^)]*\)/)) {
+                  prefix = substr(line, 1, RSTART-1)
+                  matched = substr(line, RSTART, RLENGTH)
+                  suffix = substr(line, RSTART+RLENGTH)
+                  
+                  sub(/\(\.\//, "(../", matched)
+                  line = prefix matched suffix
+                }
+                
+                # 处理普通链接: [...](./path)
+                while (match(line, /\[[^\]]*\]\(\.\/[^)]*\)/)) {
+                  prefix = substr(line, 1, RSTART-1)
+                  matched = substr(line, RSTART, RLENGTH)
+                  suffix = substr(line, RSTART+RLENGTH)
+                  
+                  sub(/\(\.\//, "(../", matched)
+                  line = prefix matched suffix
+                }
+                
+                # 处理HTML img标签
+                while (match(line, /<img[^>]*src=["'\'']\.[^"'\'']*["'\''][^>]*>/)) {
+                  prefix = substr(line, 1, RSTART-1)
+                  matched = substr(line, RSTART, RLENGTH)
+                  suffix = substr(line, RSTART+RLENGTH)
+                  
+                  sub(/src=["\'\''']\./, "src=\"../", matched)
+                  line = prefix matched suffix
+                }
+                
+                print line
               }
-              
-              # 处理普通链接: [...](./path)
-              /\[.*\]\(\.\/[^)]*\)/ {
-                gsub(/\(\.\//, "\\(../", $0)
-                print
-                next
-              }
-              
-              # 处理HTML图片标签: <img src="./path" ...>
-              /<img[^>]*src="\.\/[^"]*"[^>]*>/ {
-                gsub(/src="\.\//, "src=\\\"../", $0)
-                print
-                next
-              }
-              
-              # 其他行直接打印
-              { print }
             ' "$file" > "$temp_file"
             
             # 替换原文件
