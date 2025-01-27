@@ -1,9 +1,3 @@
----
-title: "Markdown"
-date: 2025-01-27T14:58:44+08:00
-categories: ["Markdown"]
-type: "post"
----
 # Markdown 基本语法指南
 
 ## 介绍
@@ -96,7 +90,7 @@ Markdown 支持两种链接方式：
 ```markdown
 ![图片描述](图片地址 "可选标题")
 ```
-例：![IMG test](https://raw.githubusercontent.com/Muonext/docs/refs/heads/main/Markdown/avatar.png "Avatar")
+例：![IMG test](./avatar.png "Avatar")
 ## 代码
 
 ### 行内代码
