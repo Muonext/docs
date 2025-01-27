@@ -2,7 +2,7 @@ name: Deploy Hugo site to Pages
 
 on:
   workflow_run:
-    workflows: ["Configure Hugo Settings"]
+    workflows: ["Add Front Matter", "Configure Hugo Settings"]
     types:
       - completed
     branches: [main]
@@ -13,12 +13,42 @@ permissions:
   pages: write
   id-token: write
 
+# 只允许一个并发部署
 concurrency:
   group: "pages"
   cancel-in-progress: true
 
 jobs:
+  # 等待所有必要的工作流完成
+  wait-for-workflows:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        run: |
+          # 获取最近的工作流运行状态
+          ADD_FRONT_MATTER=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/add-front-matter.yml/runs?branch=main&per_page=1" \
+            | jq -r '.workflow_runs[0].conclusion')
+          
+          CONFIGURE_SETTINGS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/configure-settings.yml/runs?branch=main&per_page=1" \
+            | jq -r '.workflow_runs[0].conclusion')
+          
+          if [ "$ADD_FRONT_MATTER" = "success" ] && [ "$CONFIGURE_SETTINGS" = "success" ]; then
+            echo "ready=true" >> $GITHUB_OUTPUT
+          else
+            echo "ready=false" >> $GITHUB_OUTPUT
+          fi
+
+  # 构建Hugo站点
   build:
+    needs: wait-for-workflows
+    if: needs.wait-for-workflows.outputs.ready == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -158,6 +188,7 @@ jobs:
         with:
           path: ./public
 
+  # 部署到 GitHub Pages
   deploy:
     needs: build
     runs-on: ubuntu-latest
