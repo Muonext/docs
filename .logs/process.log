@@ -69,3 +69,8 @@
 总文件数: 2
 成功处理: 2
 处理失败: 0
+[INFO] 跳过 ./使用指南/使用指南.md: 已存在 front matter
+[INFO] 跳过 ./Markdown/Markdown.md: 已存在 front matter
+总文件数: 2
+成功处理: 2
+处理失败: 0
